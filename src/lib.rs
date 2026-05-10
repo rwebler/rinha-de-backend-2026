@@ -1,4 +1,5 @@
 pub mod search;
+pub mod simd;
 
 use std::{collections::HashMap, fs, path::Path};
 
@@ -7,7 +8,9 @@ use chrono::{Datelike, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 
 pub const DIMENSIONS: usize = 14;
+pub const PACKED_DIMENSIONS: usize = 16;
 pub const TOP_K: usize = 5;
+pub const ARTIFACT_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct FraudRequest {
@@ -166,15 +169,40 @@ pub fn quantize_vector(vector: &[f32; DIMENSIONS]) -> [i8; DIMENSIONS] {
     out
 }
 
+pub fn quantize_vector_padded(vector: &[f32; DIMENSIONS]) -> [i8; PACKED_DIMENSIONS] {
+    let quantized = quantize_vector(vector);
+    let mut out = [0_i8; PACKED_DIMENSIONS];
+    out[..DIMENSIONS].copy_from_slice(&quantized);
+    out
+}
+
+pub fn pad_centroid(centroid: &[f32; DIMENSIONS]) -> [f32; PACKED_DIMENSIONS] {
+    let mut out = [0.0_f32; PACKED_DIMENSIONS];
+    out[..DIMENSIONS].copy_from_slice(centroid);
+    out
+}
+
 pub fn dequantize_component(value: i8) -> f32 {
     value as f32 / 127.0
 }
 
-pub fn squared_distance_i8(query: &[i8; DIMENSIONS], candidate: &[u8]) -> u32 {
+pub fn squared_distance_i8_scalar(query: &[i8; PACKED_DIMENSIONS], candidate: &[u8]) -> u32 {
     let mut sum = 0_u32;
-    for idx in 0..DIMENSIONS {
+    for idx in 0..PACKED_DIMENSIONS {
         let delta = query[idx] as i32 - candidate[idx] as i8 as i32;
         sum += (delta * delta) as u32;
+    }
+    sum
+}
+
+pub fn squared_distance_f32_scalar(
+    query: &[f32; PACKED_DIMENSIONS],
+    candidate: &[f32; PACKED_DIMENSIONS],
+) -> f32 {
+    let mut sum = 0.0_f32;
+    for idx in 0..PACKED_DIMENSIONS {
+        let delta = query[idx] - candidate[idx];
+        sum += delta * delta;
     }
     sum
 }
@@ -329,6 +357,18 @@ mod tests {
         let quantized = quantize_vector(&vector);
         assert_eq!(quantized[5], -127);
         assert_eq!(quantized[6], -127);
+    }
+
+    #[test]
+    fn padded_quantization_zeroes_extra_lanes() {
+        let vector = [
+            0.0, 1.0, 0.5, 0.25, 0.75, -1.0, -1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.5, 0.25,
+        ];
+        let quantized = quantize_vector_padded(&vector);
+        assert_eq!(quantized[5], -127);
+        assert_eq!(quantized[6], -127);
+        assert_eq!(quantized[14], 0);
+        assert_eq!(quantized[15], 0);
     }
 
     #[test]

@@ -67,7 +67,7 @@ flowchart TD
     score[Fraud-score handler<br/>POST /fraud-score]
     parse[Request parser<br/>serde_json]
     vectorize[Vectorization module<br/>14-dim deterministic mapping]
-    engine[Search engine<br/>IVF-style clustered scan]
+    engine[Search engine<br/>IVF-style clustered scan<br/>SIMD kernel dispatch]
     topk[Top-5 aggregator<br/>fixed-size nearest set]
     decision[Decision module<br/>fraud_count / 5<br/>threshold 0.6]
     fallback[Fallback scorer<br/>always returns HTTP 200]
@@ -91,7 +91,8 @@ flowchart TD
 
 - **Request parser**: deserializes the incoming JSON body into the Rust DTOs.
 - **Vectorization module**: applies the exact 14-dimension mapping from the challenge rules, including UTC hour/day extraction, `-1` sentinels for missing last-transaction fields, clamping, and MCC fallback.
-- **Search engine**: quantizes the request vector, ranks coarse centroids, probes a bounded number of inverted lists, and computes squared Euclidean distance over packed vectors.
+- **Search engine**: pads and quantizes the request vector, ranks coarse centroids, probes a bounded number of inverted lists, and computes squared Euclidean distance over packed vectors.
+- **SIMD kernel dispatch**: selects `AVX2` kernels at startup on `x86_64` when available, otherwise uses the scalar implementations.
 - **Top-5 aggregator**: maintains the current nearest five candidates without allocating a large sortable structure.
 - **Decision module**: converts the five labels into `fraud_score` and `approved`.
 - **Fallback scorer**: returns valid JSON on degraded paths so the system avoids non-200 responses during scoring.
@@ -103,11 +104,11 @@ flowchart LR
     raw[references.json.gz]
     build[build_artifacts binary]
     stream[Streaming JSON reader]
-    quantize[Quantizer<br/>14-dim f32 to 14-dim i8]
+    quantize[Quantizer<br/>14-dim f32 to 16-lane i8]
     cluster[K-means style coarse clustering]
     assign[Cluster assignment + reorder]
-    write[Artifact writer]
-    out[(meta.json<br/>centroids.bin<br/>vectors.bin<br/>labels.bin)]
+    write[Artifact writer<br/>version 2 metadata]
+    out[(meta.json<br/>packed_dimensions=16<br/>centroids.bin<br/>vectors.bin<br/>labels.bin)]
 
     raw --> build
     build --> stream
@@ -121,7 +122,9 @@ flowchart LR
 ### Notes
 
 - The builder streams the gzipped reference array and does not require a raw expanded JSON file in the runtime image.
-- Vectors are quantized to signed bytes so the API can store and scan them more compactly.
+- Vectors are quantized from 14 logical dimensions into 16 signed-byte lanes; the last 2 lanes are zero padding for SIMD-friendly loads.
+- Centroids are also stored as 16-lane records, with the last 2 `f32` lanes zeroed.
+- `meta.json` now carries artifact `version = 2` and `packed_dimensions = 16`, so old artifacts fail fast instead of loading incorrectly.
 - Reordered per-cluster storage keeps each inverted list contiguous, which makes probe scans sequential and cache-friendlier.
 
 ## Request Lifecycle
@@ -137,8 +140,10 @@ sequenceDiagram
     N->>A: proxied request
     A->>A: parse JSON
     A->>A: vectorize to 14 dims
+    A->>A: pad query to 16 lanes
     A->>S: score(vector)
-    S->>S: rank centroids
+    S->>S: dispatch AVX2 or scalar kernels
+    S->>S: rank padded centroids
     S->>S: scan probe lists
     S-->>A: top-5 labels
     A->>A: compute fraud_score
@@ -150,6 +155,7 @@ sequenceDiagram
 
 - Keep the request path self-contained and read-only after startup.
 - Move heavy dataset work into an offline build step.
+- Pad vectors and centroids to 16 lanes so the runtime can use straightforward SIMD loads instead of tail handling on 14-dimension records.
 - Prefer valid `200` JSON responses over surfacing request-path errors.
 - Keep the runtime topology compliant with the competition requirement of one load balancer plus two API instances.
 

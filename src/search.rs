@@ -10,14 +10,16 @@ use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    DIMENSIONS, FraudResponse, TOP_K, dequantize_component, quantize_vector, score_neighbors,
-    squared_distance_i8,
+    ARTIFACT_VERSION, DIMENSIONS, FraudResponse, PACKED_DIMENSIONS, TOP_K, dequantize_component,
+    pad_centroid, quantize_vector_padded, score_neighbors, simd::DistanceKernels,
+    simd::select_distance_kernels,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArtifactMeta {
     pub version: u32,
     pub dimensions: usize,
+    pub packed_dimensions: usize,
     pub vector_count: u64,
     pub cluster_count: usize,
     pub probe_count: usize,
@@ -27,9 +29,10 @@ pub struct ArtifactMeta {
 
 pub struct SearchEngine {
     pub meta: ArtifactMeta,
-    centroids: Vec<[f32; DIMENSIONS]>,
+    centroids: Vec<[f32; PACKED_DIMENSIONS]>,
     vectors: Mmap,
     labels: Mmap,
+    kernels: DistanceKernels,
     _artifact_dir: PathBuf,
 }
 
@@ -94,13 +97,7 @@ impl SearchEngine {
             meta.probe_count = probe_count.max(1).min(meta.cluster_count);
         }
 
-        if meta.dimensions != DIMENSIONS {
-            return Err(anyhow!(
-                "artifact dimension mismatch: expected {} got {}",
-                DIMENSIONS,
-                meta.dimensions
-            ));
-        }
+        validate_meta(&meta)?;
 
         let centroids = load_centroids(&dir.join("centroids.bin"), meta.cluster_count)?;
         let vectors_file = File::open(dir.join("vectors.bin"))
@@ -111,22 +108,31 @@ impl SearchEngine {
         let vectors = unsafe { Mmap::map(&vectors_file) }.context("failed to mmap vectors.bin")?;
         let labels = unsafe { Mmap::map(&labels_file) }.context("failed to mmap labels.bin")?;
 
+        validate_artifact_sizes(&meta, &vectors, &labels)?;
+
         Ok(Self {
             meta,
             centroids,
             vectors,
             labels,
+            kernels: select_distance_kernels(),
             _artifact_dir: dir,
         })
     }
 
     pub fn score(&self, query: &[f32; DIMENSIONS]) -> Result<FraudResponse> {
-        let quantized = quantize_vector(query);
+        let quantized = quantize_vector_padded(query);
+        let padded_query = pad_centroid(query);
         let mut ranked_clusters: Vec<(f32, usize)> = self
             .centroids
             .iter()
             .enumerate()
-            .map(|(idx, centroid)| (centroid_distance(query, centroid), idx))
+            .map(|(idx, centroid)| {
+                (
+                    (self.kernels.centroid_distance)(&padded_query, centroid),
+                    idx,
+                )
+            })
             .collect();
         ranked_clusters
             .sort_by(|left, right| left.0.partial_cmp(&right.0).unwrap_or(Ordering::Equal));
@@ -148,40 +154,88 @@ impl SearchEngine {
         Ok(score_neighbors(&top_k.labels()))
     }
 
+    pub fn avx2_enabled(&self) -> bool {
+        self.kernels.avx2_enabled
+    }
+
     fn scan_cluster(
         &self,
         cluster_idx: usize,
-        query: &[i8; DIMENSIONS],
+        query: &[i8; PACKED_DIMENSIONS],
         top_k: &mut TopK,
     ) -> Result<()> {
         let start = self.meta.list_offsets[cluster_idx] as usize;
         let len = self.meta.list_lengths[cluster_idx] as usize;
         for item_idx in 0..len {
             let absolute_idx = start + item_idx;
-            let base = absolute_idx * DIMENSIONS;
+            let base = absolute_idx * PACKED_DIMENSIONS;
             let candidate = self
                 .vectors
-                .get(base..base + DIMENSIONS)
+                .get(base..base + PACKED_DIMENSIONS)
                 .ok_or_else(|| anyhow!("vector slice out of bounds"))?;
             let label = *self
                 .labels
                 .get(absolute_idx)
                 .ok_or_else(|| anyhow!("label index out of bounds"))?;
-            let distance = squared_distance_i8(query, candidate);
+            let distance = (self.kernels.candidate_distance)(query, candidate);
             top_k.insert(distance, label);
         }
         Ok(())
     }
 }
 
-fn load_centroids(path: &Path, cluster_count: usize) -> Result<Vec<[f32; DIMENSIONS]>> {
+fn validate_meta(meta: &ArtifactMeta) -> Result<()> {
+    if meta.version != ARTIFACT_VERSION {
+        return Err(anyhow!(
+            "artifact version mismatch: expected {} got {}",
+            ARTIFACT_VERSION,
+            meta.version
+        ));
+    }
+    if meta.dimensions != DIMENSIONS {
+        return Err(anyhow!(
+            "artifact dimension mismatch: expected {} got {}",
+            DIMENSIONS,
+            meta.dimensions
+        ));
+    }
+    if meta.packed_dimensions != PACKED_DIMENSIONS {
+        return Err(anyhow!(
+            "artifact packed dimension mismatch: expected {} got {}",
+            PACKED_DIMENSIONS,
+            meta.packed_dimensions
+        ));
+    }
+    Ok(())
+}
+
+fn validate_artifact_sizes(meta: &ArtifactMeta, vectors: &Mmap, labels: &Mmap) -> Result<()> {
+    let expected_vector_bytes = meta.vector_count as usize * PACKED_DIMENSIONS;
+    if vectors.len() != expected_vector_bytes {
+        return Err(anyhow!(
+            "vectors.bin size mismatch: expected {} got {}",
+            expected_vector_bytes,
+            vectors.len()
+        ));
+    }
+    if labels.len() != meta.vector_count as usize {
+        return Err(anyhow!(
+            "labels.bin size mismatch: expected {} got {}",
+            meta.vector_count,
+            labels.len()
+        ));
+    }
+    Ok(())
+}
+
+fn load_centroids(path: &Path, cluster_count: usize) -> Result<Vec<[f32; PACKED_DIMENSIONS]>> {
     let mut file =
         File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
     let mut raw = Vec::new();
     file.read_to_end(&mut raw)
         .with_context(|| format!("failed to read {}", path.display()))?;
 
-    let expected_len = cluster_count * DIMENSIONS * std::mem::size_of::<f32>();
+    let expected_len = cluster_count * PACKED_DIMENSIONS * std::mem::size_of::<f32>();
     if raw.len() != expected_len {
         return Err(anyhow!(
             "centroids.bin size mismatch: expected {expected_len} got {}",
@@ -190,8 +244,8 @@ fn load_centroids(path: &Path, cluster_count: usize) -> Result<Vec<[f32; DIMENSI
     }
 
     let mut centroids = Vec::with_capacity(cluster_count);
-    for chunk in raw.chunks_exact(DIMENSIONS * 4) {
-        let mut centroid = [0.0_f32; DIMENSIONS];
+    for chunk in raw.chunks_exact(PACKED_DIMENSIONS * 4) {
+        let mut centroid = [0.0_f32; PACKED_DIMENSIONS];
         for (idx, bytes) in chunk.chunks_exact(4).enumerate() {
             centroid[idx] = f32::from_le_bytes(bytes.try_into().unwrap());
         }
@@ -200,18 +254,9 @@ fn load_centroids(path: &Path, cluster_count: usize) -> Result<Vec<[f32; DIMENSI
     Ok(centroids)
 }
 
-fn centroid_distance(query: &[f32; DIMENSIONS], centroid: &[f32; DIMENSIONS]) -> f32 {
-    let mut sum = 0.0_f32;
-    for idx in 0..DIMENSIONS {
-        let delta = query[idx] - centroid[idx];
-        sum += delta * delta;
-    }
-    sum
-}
-
-pub fn centroid_from_quantized(chunk: &[i8]) -> [f32; DIMENSIONS] {
-    let mut centroid = [0.0_f32; DIMENSIONS];
-    for idx in 0..DIMENSIONS {
+pub fn centroid_from_quantized(chunk: &[i8]) -> [f32; PACKED_DIMENSIONS] {
+    let mut centroid = [0.0_f32; PACKED_DIMENSIONS];
+    for idx in 0..PACKED_DIMENSIONS {
         centroid[idx] = dequantize_component(chunk[idx]);
     }
     centroid
@@ -233,5 +278,20 @@ mod tests {
 
         let labels = top_k.labels();
         assert_eq!(labels.iter().filter(|label| **label == 1).count(), 4);
+    }
+
+    #[test]
+    fn rejects_incompatible_meta() {
+        let meta = ArtifactMeta {
+            version: ARTIFACT_VERSION,
+            dimensions: DIMENSIONS,
+            packed_dimensions: 14,
+            vector_count: 1,
+            cluster_count: 1,
+            probe_count: 1,
+            list_offsets: vec![0],
+            list_lengths: vec![1],
+        };
+        assert!(validate_meta(&meta).is_err());
     }
 }

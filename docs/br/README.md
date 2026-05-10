@@ -126,6 +126,7 @@ Aqui está uma sugestão de ordem para leitura da documentação da edição des
 
 - **[REGRAS_DE_DETECCAO.md](./REGRAS_DE_DETECCAO.md)** — **As regras que definem a detecção de fraude**: as 14 dimensões do vetor, fórmulas de normalização, como cada campo do payload deve ser tratado para a busca vetorial e exemplos completos do fluxo. *A especificação do que você precisa implementar.*
 - **[BUSCA_VETORIAL.md](./BUSCA_VETORIAL.md)** — O que é uma busca vetorial, com exemplos passo-a-passo. *Essencial se você nunca trabalhou com vetores.*
+- **[IMPLEMENTACAO_C4.md](./IMPLEMENTACAO_C4.md)** — Diagramas em estilo C4 da implementação Rust: contexto, containers, componentes da API e fluxo de build dos artefatos.
 
 ### 3. Os dados
 

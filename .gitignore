@@ -4,3 +4,5 @@ resources/references.json
 .env
 test/results.json
 temporary-results
+target
+docker/artifacts

@@ -126,6 +126,7 @@ Here's a suggested reading order for this year's documentation.
 
 - **[DETECTION_RULES.md](./DETECTION_RULES.md)** — **The rules that define fraud detection**: the 14 vector dimensions, normalization formulas, how each payload field should be handled for the vector search, and complete flow examples. *The specification of what you need to implement.*
 - **[VECTOR_SEARCH.md](./VECTOR_SEARCH.md)** — What a vector search is, with step-by-step examples. *Essential if you've never worked with vectors.*
+- **[IMPLEMENTATION_C4.md](./IMPLEMENTATION_C4.md)** — C4-style diagrams for the Rust implementation: context, containers, API components, and artifact build flow.
 
 ### 3. The data
 

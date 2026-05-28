@@ -1,0 +1,56 @@
+services:
+  lb:
+    image: ghcr.io/rwebler/rinha-de-backend-2026/lb:latest
+    platform: linux/amd64
+    command: ["/app/lb"]
+    environment:
+      LB_LISTEN: 0.0.0.0:9999
+      FD_UPSTREAMS: /sockets/api1.ctrl,/sockets/api2.ctrl
+      LB_WORKERS: "2"
+    ports:
+      - "9999:9999"
+    volumes:
+      - sockets:/sockets
+    depends_on:
+      - api1
+      - api2
+    deploy:
+      resources:
+        limits:
+          cpus: "0.08"
+          memory: "12MB"
+
+  api1:
+    image: ghcr.io/rwebler/rinha-de-backend-2026/server:latest
+    platform: linux/amd64
+    environment:
+      LISTEN_MODE: fd
+      FD_SOCKET: /sockets/api1.ctrl
+      PROBE_COUNT: "20"
+      ADAPTIVE_INITIAL_PROBES: "6"
+    volumes:
+      - sockets:/sockets
+    deploy:
+      resources:
+        limits:
+          cpus: "0.46"
+          memory: "169MB"
+
+  api2:
+    image: ghcr.io/rwebler/rinha-de-backend-2026/server:latest
+    platform: linux/amd64
+    environment:
+      LISTEN_MODE: fd
+      FD_SOCKET: /sockets/api2.ctrl
+      PROBE_COUNT: "20"
+      ADAPTIVE_INITIAL_PROBES: "6"
+    volumes:
+      - sockets:/sockets
+    deploy:
+      resources:
+        limits:
+          cpus: "0.46"
+          memory: "169MB"
+
+volumes:
+  sockets:

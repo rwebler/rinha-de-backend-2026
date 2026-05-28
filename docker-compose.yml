@@ -1,16 +1,4 @@
 services:
-  init:
-    image: busybox:latest
-    platform: linux/amd64
-    command: ["sh", "-c", "chmod 1777 /sockets"]
-    volumes:
-      - sockets:/sockets
-    deploy:
-      resources:
-        limits:
-          cpus: "0.01"
-          memory: "8MB"
-
   lb:
     image: ghcr.io/rwebler/rinha-de-backend-2026/lb:latest
     platform: linux/amd64
@@ -24,12 +12,8 @@ services:
     volumes:
       - sockets:/sockets
     depends_on:
-      init:
-        condition: service_completed_successfully
-      api1:
-        condition: service_started
-      api2:
-        condition: service_started
+      - api1
+      - api2
     deploy:
       resources:
         limits:
@@ -46,9 +30,6 @@ services:
       ADAPTIVE_INITIAL_PROBES: "6"
     volumes:
       - sockets:/sockets
-    depends_on:
-      init:
-        condition: service_completed_successfully
     deploy:
       resources:
         limits:
@@ -65,9 +46,6 @@ services:
       ADAPTIVE_INITIAL_PROBES: "6"
     volumes:
       - sockets:/sockets
-    depends_on:
-      init:
-        condition: service_completed_successfully
     deploy:
       resources:
         limits:
@@ -76,3 +54,7 @@ services:
 
 volumes:
   sockets:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs

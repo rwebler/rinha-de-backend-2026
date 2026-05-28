@@ -58,3 +58,4 @@ volumes:
     driver_opts:
       type: tmpfs
       device: tmpfs
+      o: "mode=0777"

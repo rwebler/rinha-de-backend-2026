@@ -1,0 +1,80 @@
+name: Publish submission images
+
+# Builds the server and lb images with the haswell CPU profile and pushes
+# them to GHCR under the tags referenced by the submission branch's
+# docker-compose.yml. The Rinha test engine on the Mac Mini Late 2014
+# (Intel Core i5-4278U, Haswell) pulls these images during preview runs,
+# so they must:
+#   * be public (set once via the package settings UI)
+#   * exist at :latest for both /lb and /server
+#   * be built for linux/amd64 with AVX2/FMA/SSE4.2/POPCNT (haswell)
+#
+# Trigger on every push to main so the submission stays in sync with the
+# repo, and on workflow_dispatch so a rebuild can be forced from the UI.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "Dockerfile"
+      - "src/**"
+      - "resources/**"
+      - ".github/workflows/publish-images.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: publish-images
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: server
+            target: runtime
+          - name: lb
+            target: lb-runtime
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.name }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          provenance: false
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/rinha-de-backend-2026/${{ matrix.name }}:latest
+            ghcr.io/${{ github.repository_owner }}/rinha-de-backend-2026/${{ matrix.name }}:${{ github.sha }}
+          build-args: |
+            BUILD_CPU_PROFILE=haswell
+          cache-from: |
+            type=registry,ref=ghcr.io/${{ github.repository_owner }}/rinha-de-backend-2026/${{ matrix.name }}:buildcache
+          cache-to: |
+            type=registry,ref=ghcr.io/${{ github.repository_owner }}/rinha-de-backend-2026/${{ matrix.name }}:buildcache,mode=max

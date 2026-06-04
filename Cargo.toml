@@ -16,6 +16,10 @@ name = "build_artifacts"
 path = "src/bin/build_artifacts.rs"
 
 [[bin]]
+name = "eval_ann"
+path = "src/bin/eval_ann.rs"
+
+[[bin]]
 name = "lb"
 path = "src/bin/lb.rs"
 

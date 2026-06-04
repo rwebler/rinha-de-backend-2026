@@ -72,6 +72,15 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/rinha-de-backend-2026/${{ matrix.name }}:latest
             ghcr.io/${{ github.repository_owner }}/rinha-de-backend-2026/${{ matrix.name }}:${{ github.sha }}
+          # org.opencontainers.image.source is what GHCR reads to auto-link
+          # a freshly pushed package to this repo, which is what gives the
+          # workflow's GITHUB_TOKEN write access to the package on future
+          # runs. Without this label, packages created by an external push
+          # (e.g. `docker push` from a laptop) stay unlinked and any
+          # subsequent CI push fails with `denied: write_package`.
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
           build-args: |
             BUILD_CPU_PROFILE=haswell
           cache-from: |

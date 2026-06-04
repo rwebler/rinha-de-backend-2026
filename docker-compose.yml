@@ -32,8 +32,8 @@ services:
     environment:
       LISTEN_MODE: fd
       FD_SOCKET: /sockets/api1.ctrl
-      PROBE_COUNT: "20"
-      ADAPTIVE_INITIAL_PROBES: "6"
+      PROBE_COUNT: "64"
+      ADAPTIVE_PROBING: "false"
     volumes:
       - sockets:/sockets
     deploy:
@@ -48,8 +48,8 @@ services:
     environment:
       LISTEN_MODE: fd
       FD_SOCKET: /sockets/api2.ctrl
-      PROBE_COUNT: "20"
-      ADAPTIVE_INITIAL_PROBES: "6"
+      PROBE_COUNT: "64"
+      ADAPTIVE_PROBING: "false"
     volumes:
       - sockets:/sockets
     deploy:

@@ -110,7 +110,7 @@ impl TopK {
             return true;
         }
 
-        matches!(self.fraud_count(), 2 | 3)
+        matches!(self.fraud_count(), 1 | 2 | 3 | 4)
     }
 }
 

@@ -2,6 +2,12 @@ services:
   lb:
     image: ghcr.io/rwebler/rinha-de-backend-2026/lb:latest
     platform: linux/amd64
+    # Match the API container's uid (appuser=10001) so the LB can connect()
+    # to the UDS control sockets the API binds in /sockets. UDS connect()
+    # requires write permission on the socket file, and bind() honors the
+    # process umask — across different uids a 0644/0755 socket would
+    # otherwise refuse the LB with EACCES.
+    user: "10001:10001"
     command: ["/app/lb"]
     environment:
       LB_LISTEN: 0.0.0.0:9999

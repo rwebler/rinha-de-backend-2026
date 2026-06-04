@@ -110,7 +110,7 @@ impl TopK {
             return true;
         }
 
-        matches!(self.fraud_count(), 2 | 3)
+        self.fraud_count() == 3
     }
 }
 
@@ -495,7 +495,7 @@ mod tests {
         for (labels, should_widen) in [
             ([0, 0, 0, 0, 0], false), // 0 fraud → confident approve
             ([1, 0, 0, 0, 0], false), // 1 fraud → confident approve
-            ([1, 1, 0, 0, 0], true),  // 2 fraud → boundary, widen
+            ([1, 1, 0, 0, 0], false), // 2 fraud → confident approve
             ([1, 1, 1, 0, 0], true),  // 3 fraud → boundary, widen
             ([1, 1, 1, 1, 0], false), // 4 fraud → confident deny
             ([1, 1, 1, 1, 1], false), // 5 fraud → confident deny

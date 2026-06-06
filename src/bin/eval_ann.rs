@@ -403,7 +403,7 @@ fn unwrap_records(value: Value) -> Result<Vec<Value>> {
     match value {
         Value::Array(records) => Ok(records),
         Value::Object(mut object) => {
-            for key in ["data", "requests", "test_data"] {
+            for key in ["entries", "data", "requests", "test_data"] {
                 if let Some(records) = object.remove(key) {
                     return match records {
                         Value::Array(records) => Ok(records),
@@ -411,7 +411,11 @@ fn unwrap_records(value: Value) -> Result<Vec<Value>> {
                     };
                 }
             }
-            Ok(vec![Value::Object(object)])
+            let keys = object.keys().cloned().collect::<Vec<_>>().join(", ");
+            Err(anyhow!(
+                "top-level object does not contain a supported record array field \
+                 (expected one of entries, data, requests, test_data; keys: {keys})"
+            ))
         }
         _ => Err(anyhow!("top-level JSON must be an array or object")),
     }
@@ -570,6 +574,45 @@ mod tests {
             unwrap_records(json!([{"id": 1}, {"id": 2}])).unwrap().len(),
             2
         );
+        let records = unwrap_records(json!({
+            "references_checksum_sha256": "abc",
+            "stats": { "total": 1 },
+            "entries": [
+                {
+                    "expected_approved": true,
+                    "expected_fraud_score": 0.0,
+                    "request": {
+                        "id": "tx-1",
+                        "transaction": {
+                            "amount": 100.0,
+                            "installments": 1,
+                            "requested_at": "2026-03-11T18:45:53Z"
+                        },
+                        "customer": {
+                            "avg_amount": 50.0,
+                            "tx_count_24h": 1,
+                            "known_merchants": []
+                        },
+                        "merchant": {
+                            "id": "MERC-001",
+                            "mcc": "5411",
+                            "avg_amount": 50.0
+                        },
+                        "terminal": {
+                            "is_online": false,
+                            "card_present": true,
+                            "km_from_home": 10.0
+                        },
+                        "last_transaction": null
+                    }
+                }
+            ]
+        }))
+        .unwrap();
+        assert_eq!(records.len(), 1);
+        let extracted = extract_case(&records[0], ExpectedFormat::Auto).unwrap();
+        assert_eq!(extracted.expected_approved, true);
+        assert_eq!(extracted.request.get("id"), Some(&json!("tx-1")));
         assert_eq!(
             unwrap_records(json!({"data": [{"id": 1}]})).unwrap().len(),
             1
@@ -586,6 +629,19 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn errors_with_object_keys_when_top_level_wrapper_is_missing() {
+        let error = unwrap_records(json!({
+            "references_checksum_sha256": "abc",
+            "stats": { "total": 1 }
+        }))
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("references_checksum_sha256"));
+        assert!(error.contains("stats"));
     }
 
     #[test]

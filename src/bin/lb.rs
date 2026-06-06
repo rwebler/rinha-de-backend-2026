@@ -80,21 +80,25 @@ fn main() {
 #[cfg(target_os = "linux")]
 fn create_tcp_listener(port: u16) -> std::io::Result<libc::c_int> {
     use std::io;
-    let sock = unsafe {
-        libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0)
-    };
+    let sock = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0) };
     if sock < 0 {
         return Err(io::Error::last_os_error());
     }
     let one: libc::c_int = 1;
     unsafe {
         libc::setsockopt(
-            sock, libc::SOL_SOCKET, libc::SO_REUSEADDR,
-            &one as *const _ as *const _, std::mem::size_of::<libc::c_int>() as _,
+            sock,
+            libc::SOL_SOCKET,
+            libc::SO_REUSEADDR,
+            &one as *const _ as *const _,
+            std::mem::size_of::<libc::c_int>() as _,
         );
         libc::setsockopt(
-            sock, libc::SOL_SOCKET, libc::SO_REUSEPORT,
-            &one as *const _ as *const _, std::mem::size_of::<libc::c_int>() as _,
+            sock,
+            libc::SOL_SOCKET,
+            libc::SO_REUSEPORT,
+            &one as *const _ as *const _,
+            std::mem::size_of::<libc::c_int>() as _,
         );
     }
     let mut addr: libc::sockaddr_in = unsafe { std::mem::zeroed() };
@@ -124,9 +128,7 @@ fn create_tcp_listener(port: u16) -> std::io::Result<libc::c_int> {
 #[cfg(target_os = "linux")]
 fn connect_unix(path: &str) -> std::io::Result<libc::c_int> {
     use std::io;
-    let fd = unsafe {
-        libc::socket(libc::AF_UNIX, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0)
-    };
+    let fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0) };
     if fd < 0 {
         return Err(io::Error::last_os_error());
     }
@@ -182,8 +184,11 @@ fn set_tcp_nodelay(fd: libc::c_int) {
     let one: libc::c_int = 1;
     unsafe {
         libc::setsockopt(
-            fd, libc::IPPROTO_TCP, libc::TCP_NODELAY,
-            &one as *const _ as *const _, std::mem::size_of::<libc::c_int>() as _,
+            fd,
+            libc::IPPROTO_TCP,
+            libc::TCP_NODELAY,
+            &one as *const _ as *const _,
+            std::mem::size_of::<libc::c_int>() as _,
         );
     }
 }
@@ -210,8 +215,7 @@ fn send_fd_once(control_fd: libc::c_int, client_fd: libc::c_int) -> bool {
         }
         (*cmsg).cmsg_level = libc::SOL_SOCKET;
         (*cmsg).cmsg_type = libc::SCM_RIGHTS;
-        (*cmsg).cmsg_len =
-            libc::CMSG_LEN(std::mem::size_of::<libc::c_int>() as u32) as _;
+        (*cmsg).cmsg_len = libc::CMSG_LEN(std::mem::size_of::<libc::c_int>() as u32) as _;
         std::ptr::copy_nonoverlapping(
             &client_fd as *const libc::c_int as *const u8,
             libc::CMSG_DATA(cmsg),
@@ -299,10 +303,7 @@ fn worker_loop(
 ) {
     use std::sync::atomic::Ordering;
 
-    let mut senders: Vec<Sender> = upstreams
-        .iter()
-        .map(|p| Sender::new(p.clone()))
-        .collect();
+    let mut senders: Vec<Sender> = upstreams.iter().map(|p| Sender::new(p.clone())).collect();
 
     loop {
         let client = unsafe {

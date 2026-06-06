@@ -839,8 +839,7 @@ mod tests {
     #[test]
     fn listen_config_accepts_fd_socket() {
         assert_eq!(
-            ListenConfig::from_values(Some("fd"), None, None, Some("/sockets/api1.ctrl"))
-                .unwrap(),
+            ListenConfig::from_values(Some("fd"), None, None, Some("/sockets/api1.ctrl")).unwrap(),
             ListenConfig::FdSocket(PathBuf::from("/sockets/api1.ctrl"))
         );
     }
@@ -848,8 +847,7 @@ mod tests {
     #[test]
     fn listen_config_fd_falls_back_to_bind_socket() {
         assert_eq!(
-            ListenConfig::from_values(Some("fd"), None, Some("/sockets/api1.ctrl"), None)
-                .unwrap(),
+            ListenConfig::from_values(Some("fd"), None, Some("/sockets/api1.ctrl"), None).unwrap(),
             ListenConfig::FdSocket(PathBuf::from("/sockets/api1.ctrl"))
         );
     }
@@ -857,8 +855,10 @@ mod tests {
     #[test]
     fn listen_config_requires_socket_for_fd_mode() {
         let error = ListenConfig::from_values(Some("fd"), None, None, None).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("FD_SOCKET (or BIND_SOCKET) is required when LISTEN_MODE=fd"));
+        assert!(
+            error
+                .to_string()
+                .contains("FD_SOCKET (or BIND_SOCKET) is required when LISTEN_MODE=fd")
+        );
     }
 }

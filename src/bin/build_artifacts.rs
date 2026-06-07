@@ -16,7 +16,7 @@ use serde::de::{Deserializer, IgnoredAny, SeqAccess, Visitor};
 
 const DEFAULT_INPUT: &str = "resources/references.json.gz";
 const DEFAULT_OUTPUT: &str = "docker/artifacts";
-const DEFAULT_CLUSTERS: usize = 2048;
+const DEFAULT_CLUSTERS: usize = 4096;
 const DEFAULT_PROBES: usize = 12;
 const SAMPLE_TARGET: usize = 16_384;
 const KMEANS_ITERATIONS: usize = 6;
